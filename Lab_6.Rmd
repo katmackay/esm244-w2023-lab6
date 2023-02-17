@@ -1,0 +1,189 @@
+---
+title: "lab 6"
+author: "Kat Mackay"
+date: "2023-02-16"
+output: html_document
+  html_document:
+    code_folding: show
+---
+
+```{r setup, echo = TRUE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(janitor)
+library(palmerpenguins)
+
+### Packages for cluster analysis
+library(NbClust)
+#install.packages("NbClust")
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(ggdendro)
+#install.packages("factoextra")
+#install.packages("dendextend")
+#install.packages("ggdendro")
+```
+
+#Intro to cluster analysis - k-means, heirarchical 
+
+## Part 1: K-means clustering 
+```{r}
+ggplot(penguins) + 
+  geom_point(aes(x = bill_length_mm, y = bill_depth_mm,
+                 color = species, shape = sex), 
+             size = 3, alpha = 0.7) + 
+  scale_color_manual(values = c('orange', 'cyan4', 'darkmagenta'))
+
+ggplot(penguins) + 
+  geom_point(aes(x = flipper_length_mm, 
+                 y = body_mass_g, 
+                 color = species, 
+                 shape = sex),
+             size = 3, alpha = 0.7) + 
+  scale_color_manual(values = c('orange', 'cyan4', 'darkmagenta'))
+```
+
+### Create a complete, scaled version of the data 
+```{r}
+penguins_complete <- penguins %>% 
+  drop_na(bill_length_mm, bill_depth_mm, body_mass_g, flipper_length_mm) 
+
+penguins_scale <- penguins_complete %>% 
+  select(ends_with('_mm'), body_mass_g) %>% 
+  scale()
+
+summary(penguins_scale)
+```
+
+### Estimate number of clusters 
+```{r}
+number_est <- NbClust(penguins_scale, 
+                      min.nc = 2, max.nc = 10, 
+                      method = 'kmeans')
+
+fviz_nbclust(penguins_scale, FUNcluster = kmeans, method = 'wss', k.max = 10)
+```
+
+### Run some k-means
+```{r}
+set.seed(123)
+
+penguins_km <- kmeans(penguins_scale, 
+                      centers = 3, 
+                      iter.max = 10, 
+                      nstart = 25)
+
+#penguins_km$size
+#penguins_km$cluster
+
+penguins_cl <- penguins_complete %>% 
+  mutate(cluster_no = factor(penguins_km$cluster))
+```
+
+```{r}
+ggplot(penguins_cl) + 
+  geom_point(aes(x = flipper_length_mm, 
+                 y = body_mass_g, 
+                 color = cluster_no,
+                 shape = species))
+
+
+ggplot(penguins_cl) + 
+  geom_point(aes(x = bill_length_mm, 
+                 y = bill_depth_mm,  
+                 color = cluster_no,
+                 shape = species)) + 
+             scale_color_manual(values = c('lightblue', 'lightpink', 'lightgreen'))
+
+penguins_cl %>% 
+  select(species, cluster_no) %>% 
+  table()
+  
+```
+
+## Hierarchical clustering 
+
+### Start with complete linkage
+```{r}
+### Create distance matrix 
+peng_dist <- dist(penguins_scale, method = 'euclidean')
+
+### Hierarchical clustering (complete linkage)
+peng_hc_complete <- hclust(peng_dist, method = 'complete')
+## also: single, average, ward.D
+
+plot(peng_hc_complete, cex = 0.6, hang = -1)
+
+### Cut into three clusters 
+peng_cut_hc <- cutree(peng_hc_complete, 3)
+table(peng_cut_hc, penguins_complete$species)
+# BLR uses multiple variables but uses it to create a predictive model based on the data to determine what we would expect to see from each species 
+# know that the group has certain characteristics but we aren't sure what the characteristics are 
+```
+
+## World Bank data: read in and simplify 
+```{r}
+wb_env <- read_csv(here::here('data/wb_env.csv'))
+
+wb_ghg_20 <- wb_env %>% 
+  slice_max(n = 20, ghg)
+
+summary(wb_ghg_20)
+
+wb_scaled <- wb_ghg_20 %>% 
+  select(3:7) %>% 
+  scale()
+
+summary(wb_scaled)
+
+rownames(wb_scaled) <- wb_ghg_20$name  # allows us to use a column we had before as the names of the rows 
+
+```
+
+# Find the Euclidian distances 
+
+```{r}
+euc_distance <- dist(wb_scaled, method = 'euclidian')
+euc_distance
+```
+
+### Perform hierarchical clustering with complete linkage
+```{r}
+hc_complete <- hclust(euc_distance, method = 'complete')
+
+plot(hc_complete, cex = .6, hang = -1)
+```
+
+### Perform heirarchical clustering by single linkage
+```{r}
+hc_single <- hclust(euc_distance, method = 'single')
+
+plot(hc_single, cex = .6, hang = -1)
+```
+
+### Make a tanglegram 
+```{r}
+dend_complete <- as.dendrogram(hc_complete)
+dend_single <- as.dendrogram(hc_single)
+
+tanglegram(dend_complete, dend_single)
+#compares the way they were clustered together 
+#countries that are being grouped or clustered in the same way based on the complete vs single linkage
+
+entanglement(dend_complete, dend_single) #lower is better
+
+untangle(dend_complete, dend_single, method = 'step1side') %>% 
+  entanglement() #matched them better going across -- easier to see the differences between the two 
+
+untangle(dend_complete, dend_single, method = 'step1side') %>% 
+  tanglegram(common_subtrees_color_branches = TRUE) 
+```
+### Let's make a dendrogram in ggplot! 
+```{r}
+ggdendrogram(hc_complete, rotate = TRUE) + 
+  theme_minimal() + 
+  labs(x = 'Country')
+```
+
